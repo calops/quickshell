@@ -82,6 +82,10 @@ PendingRegion::PendingRegion(QObject* parent): QObject(parent) {
 	QObject::connect(this, &PendingRegion::bottomLeftRadiusChanged, this, &PendingRegion::changed);
 	QObject::connect(this, &PendingRegion::bottomRightRadiusChanged, this, &PendingRegion::changed);
 	QObject::connect(this, &PendingRegion::childrenChanged, this, &PendingRegion::changed);
+	QObject::connect(this, &PendingRegion::itemsChanged, this, &PendingRegion::changed);
+	QObject::connect(this, &PendingRegion::itemRadiusChanged, this, &PendingRegion::changed);
+	QObject::connect(this, &PendingRegion::itemShapeChanged, this, &PendingRegion::changed);
+	QObject::connect(this, &PendingRegion::itemIntersectionChanged, this, &PendingRegion::changed);
 }
 
 void PendingRegion::setItem(QQuickItem* item) {
@@ -107,6 +111,68 @@ void PendingRegion::setItem(QQuickItem* item) {
 void PendingRegion::onItemDestroyed() { this->mItem = nullptr; }
 
 void PendingRegion::onChildDestroyed() { this->mRegions.removeAll(this->sender()); }
+
+QVariantList PendingRegion::items() const { return this->mItems; }
+
+void PendingRegion::setItems(const QVariantList& items) {
+	if (items == this->mItems) return;
+
+	this->disconnectAllItemTracking();
+	this->mItems = items;
+
+	for (const auto& variant : this->mItems) {
+		auto* item = qvariant_cast<QQuickItem*>(variant);
+		if (item != nullptr) {
+			this->connectItemTracking(item);
+		}
+	}
+
+	emit this->itemsChanged();
+}
+
+void PendingRegion::connectItemTracking(QQuickItem* item) {
+	this->mItemConnections.push_back(
+	    QObject::connect(item, &QObject::destroyed, this, &PendingRegion::onItemInItemsDestroyed)
+	);
+	this->mItemConnections.push_back(
+	    QObject::connect(item, &QQuickItem::xChanged, this, &PendingRegion::changed)
+	);
+	this->mItemConnections.push_back(
+	    QObject::connect(item, &QQuickItem::yChanged, this, &PendingRegion::changed)
+	);
+	this->mItemConnections.push_back(
+	    QObject::connect(item, &QQuickItem::widthChanged, this, &PendingRegion::changed)
+	);
+	this->mItemConnections.push_back(
+	    QObject::connect(item, &QQuickItem::heightChanged, this, &PendingRegion::changed)
+	);
+
+	auto* parent = item->parentItem();
+	while (parent != nullptr) {
+		this->mItemConnections.push_back(
+		    QObject::connect(parent, &QQuickItem::xChanged, this, &PendingRegion::changed)
+		);
+		this->mItemConnections.push_back(
+		    QObject::connect(parent, &QQuickItem::yChanged, this, &PendingRegion::changed)
+		);
+		parent = parent->parentItem();
+	}
+}
+
+void PendingRegion::disconnectAllItemTracking() {
+	for (const auto& connection : this->mItemConnections) {
+		QObject::disconnect(connection);
+	}
+	this->mItemConnections.clear();
+}
+
+void PendingRegion::onItemInItemsDestroyed() {
+	auto* destroyed = this->sender();
+	this->mItems.removeIf([destroyed](const QVariant& variant) {
+		return qvariant_cast<QQuickItem*>(variant) == destroyed;
+	});
+	emit this->changed();
+}
 
 qint32 PendingRegion::radius() const { return this->mRadius; }
 
@@ -238,6 +304,46 @@ QRegion PendingRegion::build() const {
 
 	for (const auto& childRegion: this->mRegions) {
 		region = childRegion->applyTo(region);
+	}
+
+	for (const auto& variant : this->mItems) {
+		auto* item = qvariant_cast<QQuickItem*>(variant);
+		if (item == nullptr) continue;
+
+		auto origin = item->mapToScene(QPointF(0, 0));
+		auto extent = item->mapToScene(QPointF(item->width(), item->height()));
+		auto size = extent - origin;
+
+		auto type = QRegion::Rectangle;
+		switch (this->mItemShape) {
+		case RegionShape::Rect: type = QRegion::Rectangle; break;
+		case RegionShape::Ellipse: type = QRegion::Ellipse; break;
+		}
+
+		auto itemRegion = QRegion(
+		    static_cast<int>(origin.x()),
+		    static_cast<int>(origin.y()),
+		    static_cast<int>(std::ceil(size.x())),
+		    static_cast<int>(std::ceil(size.y())),
+		    type
+		);
+
+		if (this->mItemShape == RegionShape::Rect) {
+			itemRegion = applyCornerRadius(
+			    itemRegion,
+			    this->mItemRadius,
+			    this->mItemRadius,
+			    this->mItemRadius,
+			    this->mItemRadius
+			);
+		}
+
+		switch (this->mItemIntersection) {
+		case Intersection::Combine: region = region.united(itemRegion); break;
+		case Intersection::Subtract: region = region.subtracted(itemRegion); break;
+		case Intersection::Intersect: region = region.intersected(itemRegion); break;
+		case Intersection::Xor: region = region.xored(itemRegion); break;
+		}
 	}
 
 	return region;
