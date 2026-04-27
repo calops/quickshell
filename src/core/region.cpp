@@ -9,7 +9,64 @@
 #include <qregion.h>
 #include <qtmetamacros.h>
 #include <qtypes.h>
+#include <qvariant.h>
 #include <qvectornd.h>
+
+namespace {
+
+QRegion applyCornerRadius(QRegion region, qint32 tl, qint32 tr, qint32 bl, qint32 br) {
+	if (tl <= 0 && tr <= 0 && bl <= 0 && br <= 0) return region;
+	if (region.isEmpty()) return region;
+
+	tl = std::max(tl, 0);
+	tr = std::max(tr, 0);
+	bl = std::max(bl, 0);
+	br = std::max(br, 0);
+
+	auto rect = region.boundingRect();
+	auto x = rect.x();
+	auto y = rect.y();
+	auto w = rect.width();
+	auto h = rect.height();
+
+	auto topScale = tl + tr > w ? static_cast<double>(w) / (tl + tr) : 1.0;
+	auto bottomScale = bl + br > w ? static_cast<double>(w) / (bl + br) : 1.0;
+	auto leftScale = tl + bl > h ? static_cast<double>(h) / (tl + bl) : 1.0;
+	auto rightScale = tr + br > h ? static_cast<double>(h) / (tr + br) : 1.0;
+
+	tl = static_cast<qint32>(tl * std::min(topScale, leftScale));
+	tr = static_cast<qint32>(tr * std::min(topScale, rightScale));
+	bl = static_cast<qint32>(bl * std::min(bottomScale, leftScale));
+	br = static_cast<qint32>(br * std::min(bottomScale, rightScale));
+
+	if (tl > 0) {
+		auto box = QRegion(x, y, tl, tl);
+		auto ellipse = QRegion(x, y, tl * 2, tl * 2, QRegion::Ellipse);
+		region -= box - (ellipse & box);
+	}
+
+	if (tr > 0) {
+		auto box = QRegion(x + w - tr, y, tr, tr);
+		auto ellipse = QRegion(x + w - tr * 2, y, tr * 2, tr * 2, QRegion::Ellipse);
+		region -= box - (ellipse & box);
+	}
+
+	if (bl > 0) {
+		auto box = QRegion(x, y + h - bl, bl, bl);
+		auto ellipse = QRegion(x, y + h - bl * 2, bl * 2, bl * 2, QRegion::Ellipse);
+		region -= box - (ellipse & box);
+	}
+
+	if (br > 0) {
+		auto box = QRegion(x + w - br, y + h - br, br, br);
+		auto ellipse = QRegion(x + w - br * 2, y + h - br * 2, br * 2, br * 2, QRegion::Ellipse);
+		region -= box - (ellipse & box);
+	}
+
+	return region;
+}
+
+} // namespace
 
 PendingRegion::PendingRegion(QObject* parent): QObject(parent) {
 	QObject::connect(this, &PendingRegion::shapeChanged, this, &PendingRegion::changed);
@@ -169,58 +226,14 @@ QRegion PendingRegion::build() const {
 		region = QRegion(this->mX, this->mY, this->mWidth, this->mHeight, type);
 	}
 
-	if (this->mShape == RegionShape::Rect && !region.isEmpty()) {
-		auto tl = std::max(this->topLeftRadius(), 0);
-		auto tr = std::max(this->topRightRadius(), 0);
-		auto bl = std::max(this->bottomLeftRadius(), 0);
-		auto br = std::max(this->bottomRightRadius(), 0);
-
-		if (tl > 0 || tr > 0 || bl > 0 || br > 0) {
-			auto rect = region.boundingRect();
-			auto x = rect.x();
-			auto y = rect.y();
-			auto w = rect.width();
-			auto h = rect.height();
-
-			// Normalize so adjacent corners don't exceed their shared edge.
-			// Each corner is scaled by the tightest constraint of its two edges.
-			auto topScale = tl + tr > w ? static_cast<double>(w) / (tl + tr) : 1.0;
-			auto bottomScale = bl + br > w ? static_cast<double>(w) / (bl + br) : 1.0;
-			auto leftScale = tl + bl > h ? static_cast<double>(h) / (tl + bl) : 1.0;
-			auto rightScale = tr + br > h ? static_cast<double>(h) / (tr + br) : 1.0;
-
-			tl = static_cast<qint32>(tl * std::min(topScale, leftScale));
-			tr = static_cast<qint32>(tr * std::min(topScale, rightScale));
-			bl = static_cast<qint32>(bl * std::min(bottomScale, leftScale));
-			br = static_cast<qint32>(br * std::min(bottomScale, rightScale));
-
-			// Unlock each corner: subtract (cornerBox - quarterEllipse) from the
-			// full rect. Each corner only modifies pixels inside its own box,
-			// so no diagonal overlap is possible.
-			if (tl > 0) {
-				auto box = QRegion(x, y, tl, tl);
-				auto ellipse = QRegion(x, y, tl * 2, tl * 2, QRegion::Ellipse);
-				region -= box - (ellipse & box);
-			}
-
-			if (tr > 0) {
-				auto box = QRegion(x + w - tr, y, tr, tr);
-				auto ellipse = QRegion(x + w - tr * 2, y, tr * 2, tr * 2, QRegion::Ellipse);
-				region -= box - (ellipse & box);
-			}
-
-			if (bl > 0) {
-				auto box = QRegion(x, y + h - bl, bl, bl);
-				auto ellipse = QRegion(x, y + h - bl * 2, bl * 2, bl * 2, QRegion::Ellipse);
-				region -= box - (ellipse & box);
-			}
-
-			if (br > 0) {
-				auto box = QRegion(x + w - br, y + h - br, br, br);
-				auto ellipse = QRegion(x + w - br * 2, y + h - br * 2, br * 2, br * 2, QRegion::Ellipse);
-				region -= box - (ellipse & box);
-			}
-		}
+	if (this->mShape == RegionShape::Rect) {
+		region = applyCornerRadius(
+		    region,
+		    this->topLeftRadius(),
+		    this->topRightRadius(),
+		    this->bottomLeftRadius(),
+		    this->bottomRightRadius()
+		);
 	}
 
 	for (const auto& childRegion: this->mRegions) {
