@@ -21,17 +21,17 @@ BackgroundEffectSurface::~BackgroundEffectSurface() {
 void BackgroundEffectSurface::setBlurRegion(const QRegion& region) {
 	if (!this->isInitialized()) return;
 
-	if (region.isEmpty()) {
-		this->set_blur_region(nullptr);
-		return;
-	}
-
 	static const auto* waylandIntegration = QtWaylandClient::QWaylandIntegration::instance();
 	auto* display = waylandIntegration->display();
 
 	auto* wlRegion = display->createRegion(region);
 	this->set_blur_region(wlRegion);
 	wl_region_destroy(wlRegion); // NOLINT(misc-include-cleaner)
+}
+
+void BackgroundEffectSurface::clearBlurRegion() {
+	if (!this->isInitialized()) return;
+	this->set_blur_region(nullptr);
 }
 
 } // namespace qs::wayland::background_effect::impl

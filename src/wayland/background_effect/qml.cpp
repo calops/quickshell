@@ -112,9 +112,11 @@ void BackgroundEffect::onWindowPolished() {
 
 		auto margins = this->mWaylandWindow->clientSideMargins();
 		region.translate(margins.left(), margins.top());
-	}
 
-	this->surface->setBlurRegion(region);
+		this->surface->setBlurRegion(region);
+	} else {
+		this->surface->clearBlurRegion();
+	}
 	this->pendingBlurRegion = false;
 }
 
