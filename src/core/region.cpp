@@ -147,6 +147,18 @@ void PendingRegion::connectItemTracking(QQuickItem* item) {
 	    QObject::connect(item, &QQuickItem::heightChanged, this, &PendingRegion::changed)
 	);
 
+	auto radiusPropIdx = item->metaObject()->indexOfProperty("radius");
+	if (radiusPropIdx >= 0) {
+		auto radiusProp = item->metaObject()->property(radiusPropIdx);
+		if (radiusProp.hasNotifySignal()) {
+			auto signal = radiusProp.notifySignal();
+			auto method = QMetaMethod::fromSignal(&PendingRegion::changed);
+			this->mItemConnections.push_back(
+			    QMetaObject::connect(item, signal.methodIndex(), this, method.methodIndex())
+			);
+		}
+	}
+
 	auto* parent = item->parentItem();
 	while (parent != nullptr) {
 		this->mItemConnections.push_back(
@@ -329,13 +341,14 @@ QRegion PendingRegion::build() const {
 		);
 
 		if (this->mItemShape == RegionShape::Rect) {
-			itemRegion = applyCornerRadius(
-			    itemRegion,
-			    this->mItemRadius,
-			    this->mItemRadius,
-			    this->mItemRadius,
-			    this->mItemRadius
-			);
+			auto r = this->mItemRadius;
+			if (r <= 0) {
+				auto radiusProp = item->property("radius");
+				if (radiusProp.isValid()) r = radiusProp.toInt();
+			}
+			if (r > 0) {
+				itemRegion = applyCornerRadius(itemRegion, r, r, r, r);
+			}
 		}
 
 		switch (this->mItemIntersection) {
