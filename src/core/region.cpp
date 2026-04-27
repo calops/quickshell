@@ -91,18 +91,15 @@ PendingRegion::PendingRegion(QObject* parent): QObject(parent) {
 void PendingRegion::setItem(QQuickItem* item) {
 	if (item == this->mItem) return;
 
-	if (this->mItem != nullptr) {
-		QObject::disconnect(this->mItem, nullptr, this, nullptr);
-	}
+	this->disconnectSingleItemTracking();
 
 	this->mItem = item;
 
 	if (item != nullptr) {
-		QObject::connect(this->mItem, &QObject::destroyed, this, &PendingRegion::onItemDestroyed);
-		QObject::connect(this->mItem, &QQuickItem::xChanged, this, &PendingRegion::itemChanged);
-		QObject::connect(this->mItem, &QQuickItem::yChanged, this, &PendingRegion::itemChanged);
-		QObject::connect(this->mItem, &QQuickItem::widthChanged, this, &PendingRegion::itemChanged);
-		QObject::connect(this->mItem, &QQuickItem::heightChanged, this, &PendingRegion::itemChanged);
+		this->connectItemGeometryTracking(item, this->mSingleItemConnections);
+		this->mSingleItemConnections.push_back(
+		    QObject::connect(item, &QObject::destroyed, this, &PendingRegion::onItemDestroyed)
+		);
 	}
 
 	emit this->itemChanged();
@@ -123,27 +120,29 @@ void PendingRegion::setItems(const QVariantList& items) {
 	for (const auto& variant : this->mItems) {
 		auto* item = qvariant_cast<QQuickItem*>(variant);
 		if (item != nullptr) {
-			this->connectItemTracking(item);
+			this->connectItemGeometryTracking(item, this->mItemConnections);
+			this->mItemConnections.push_back(
+			    QObject::connect(item, &QObject::destroyed, this, &PendingRegion::onItemInItemsDestroyed)
+			);
 		}
 	}
 
 	emit this->itemsChanged();
 }
 
-void PendingRegion::connectItemTracking(QQuickItem* item) {
-	this->mItemConnections.push_back(
-	    QObject::connect(item, &QObject::destroyed, this, &PendingRegion::onItemInItemsDestroyed)
-	);
-	this->mItemConnections.push_back(
+void PendingRegion::connectItemGeometryTracking(
+    QQuickItem* item, QList<QMetaObject::Connection>& connections
+) {
+	connections.push_back(
 	    QObject::connect(item, &QQuickItem::xChanged, this, &PendingRegion::changed)
 	);
-	this->mItemConnections.push_back(
+	connections.push_back(
 	    QObject::connect(item, &QQuickItem::yChanged, this, &PendingRegion::changed)
 	);
-	this->mItemConnections.push_back(
+	connections.push_back(
 	    QObject::connect(item, &QQuickItem::widthChanged, this, &PendingRegion::changed)
 	);
-	this->mItemConnections.push_back(
+	connections.push_back(
 	    QObject::connect(item, &QQuickItem::heightChanged, this, &PendingRegion::changed)
 	);
 
@@ -153,7 +152,7 @@ void PendingRegion::connectItemTracking(QQuickItem* item) {
 		if (radiusProp.hasNotifySignal()) {
 			auto signal = radiusProp.notifySignal();
 			auto method = QMetaMethod::fromSignal(&PendingRegion::changed);
-			this->mItemConnections.push_back(
+			connections.push_back(
 			    QMetaObject::connect(item, signal.methodIndex(), this, method.methodIndex())
 			);
 		}
@@ -161,14 +160,21 @@ void PendingRegion::connectItemTracking(QQuickItem* item) {
 
 	auto* parent = item->parentItem();
 	while (parent != nullptr) {
-		this->mItemConnections.push_back(
+		connections.push_back(
 		    QObject::connect(parent, &QQuickItem::xChanged, this, &PendingRegion::changed)
 		);
-		this->mItemConnections.push_back(
+		connections.push_back(
 		    QObject::connect(parent, &QQuickItem::yChanged, this, &PendingRegion::changed)
 		);
 		parent = parent->parentItem();
 	}
+}
+
+void PendingRegion::disconnectSingleItemTracking() {
+	for (const auto& connection : this->mSingleItemConnections) {
+		QObject::disconnect(connection);
+	}
+	this->mSingleItemConnections.clear();
 }
 
 void PendingRegion::disconnectAllItemTracking() {

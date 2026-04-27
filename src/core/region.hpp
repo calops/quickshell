@@ -209,7 +209,8 @@ private:
 	static void
 	regionsReplace(QQmlListProperty<PendingRegion>* prop, qsizetype i, PendingRegion* region);
 
-	void connectItemTracking(QQuickItem* item);
+	void connectItemGeometryTracking(QQuickItem* item, QList<QMetaObject::Connection>& connections);
+	void disconnectSingleItemTracking();
 	void disconnectAllItemTracking();
 
 	enum CornerOverride : quint8 {
@@ -238,4 +239,5 @@ private:
 	RegionShape::Enum mItemShape = RegionShape::Rect;
 	Intersection::Enum mItemIntersection = Intersection::Combine;
 	QList<QMetaObject::Connection> mItemConnections;
+	QList<QMetaObject::Connection> mSingleItemConnections;
 };
